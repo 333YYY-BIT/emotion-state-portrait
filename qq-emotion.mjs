@@ -266,8 +266,8 @@ export function statusWordFor(cfg, st, tick) {
   return { ...ladder, special: false };
 }
 
-// ── 输出：mood.txt + 人格块 ────────────────────────────────────────
-export function moodLine(st, cfg) {
+// ── 输出：mood.txt（中立）+ mood-map.json（按聊天对象）+ 人格块 ────────
+export function moodLine(st, cfg, chatQq) {
   const vm = vocabMap(cfg);
   const parts = [];
   if ((st.mood || []).length) {
@@ -281,7 +281,8 @@ export function moodLine(st, cfg) {
   }
   const stt = st.status || {};
   parts.push('状态：' + stt.word + '（精神' + Math.round(st.spirit) + '）' + (stt.cue ? '——' + stt.cue : ''));
-  const qq = (st.lastTick || {}).chat;
+  // chatQq 显式指定聊天对象；'' / null 表示不写「对谁」；undefined 时沿用 lastTick（CLI 展示用）
+  const qq = chatQq === undefined ? (st.lastTick || {}).chat : chatQq;
   const p = qq ? (st.portraits || {})[qq] : null;
   if (p) {
     const f = Number(p.familiarity) || 0;
@@ -310,21 +311,24 @@ function buildBlock(st, cfg) {
   }
   const stt = st.status || {};
   lines.push('状态：' + stt.word + '（精神' + Math.round(st.spirit) + '/100）——盖在情绪之上的一层底色' + (stt.cue ? '：' + stt.cue : ''));
-  const qq = (st.lastTick || {}).chat;
-  const p = qq ? (st.portraits || {})[qq] : null;
-  if (p) {
-    lines.push('对' + p.name + '：' + famPhrase(Number(p.familiarity) || 0)
-      + '（熟度' + Math.round(Number(p.familiarity) || 0) + '·羁绊' + Math.round(Number(p.bond) || 0) + '）'
-      + (p.summary ? '；画像：' + String(p.summary).slice(0, 48) : ''));
-  }
+  // 人格块是全局静态备份，不写「对谁」（避免跟当前聊天对象错位；按人信息在 mood-map.json 里）
   lines.push('（这是你的底色，不用说出来，说话自然带着就行）');
   return [begin, ...lines, end].join('\n');
 }
 
 export function writeOutputs(st, cfg) {
-  // mood.txt（或 integration.moodFile）：宿主每轮读它注入，热生效
+  // mood.txt（或 integration.moodFile）：全局中立行，不存在「对谁」的错位信息
   const moodPath = resolve(HERE, cfg.integration?.moodFile || 'mood.txt');
-  writeFileSync(moodPath, moodLine(st, cfg), 'utf8');
+  const neutral = moodLine(st, cfg, '');
+  writeFileSync(moodPath, neutral, 'utf8');
+  // mood-map.json：按聊天对象各一行（插件按 chatId 取对应的人，取不到用 default 中立行）
+  try {
+    const map = { default: neutral };
+    for (const qq of Object.keys(st.portraits || {})) map[qq] = moodLine(st, cfg, qq);
+    writeFileSync(resolve(HERE, 'mood-map.json'), JSON.stringify(map, null, 2), 'utf8');
+  } catch (e) {
+    log('⚠️ mood-map 写入失败: ' + String(e.message).slice(0, 60));
+  }
   // 人格「心情」块：静态备份（可选，integration.personaBlock.enabled=false 时跳过）
   const pb = cfg.integration?.personaBlock;
   if (!pb || pb.enabled === false) return;
