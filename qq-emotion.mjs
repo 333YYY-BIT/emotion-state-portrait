@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * qq-emotion.mjs —— 情绪 / 状态 / 人物画像 引擎（纯 Node，不依赖框架）。
+ * qq-emotion.mjs —— 小鲸的情绪 / 状态 / 人物画像 引擎（v1，纯 Node，不接外部引擎）。
  *
  * 三层模型（设计见 情绪状态画像-设计.md）：
  *   情绪（事件触发，Lv1~4，最多 3 个叠加，随 tick 衰减）
@@ -35,10 +35,10 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
-const require = createRequire(import.meta.url);
-// onebot 模式（QQ 等）需要 ws 包（npm i ws）；file 模式完全用不到
-let WebSocket = null;
-try { WebSocket = require('ws'); } catch { /* 未安装：file 模式照常工作 */ }
+const require = createRequire(
+  'file:///C:/Users/YangXinYuan/.dsh/profiles/desktop/node_modules/dsh-onebot-qq/lib/index.js',
+);
+const WebSocket = require('ws');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EMOTION_DIR = join(HERE, 'emotion');
@@ -54,7 +54,7 @@ const STATE = process.env.EMOTION_STATE
 const MOOD_FILE = join(HERE, 'mood.txt'); // 默认注入文件（integration.moodFile 可改）
 const LOG = join(HERE, 'emotion.log');
 const FRIENDS = join(HERE, 'friends.json');
-const MEM_DIR = join(HERE, 'memory-notes'); // 可选：memory-notes/*.md 的文件名会作为画像记忆线索
+const MEM_DIR = join(HERE, 'xiaojing-memory');
 
 const PAD_ = ' '.repeat(16);
 const BEGIN = '=== 你现在的心情（自动更新·别念出来·只当底色）===';
@@ -119,7 +119,6 @@ function friendsMap() {
 
 // ── NapCat WS ──────────────────────────────────────────────────────
 function callApi(action, params) {
-  if (!WebSocket) return Promise.reject(new Error('onebot 模式需要 ws 包：npm i ws（file 模式不需要）'));
   return new Promise((resolvePromise, rejectPromise) => {
     const echo = 'em-' + Math.random().toString(36).slice(2);
     const ws = new WebSocket(WS_URL, { headers: { Authorization: 'Bearer ' + TOKEN } });
@@ -223,6 +222,8 @@ function readKey(cfg) {
 export function vocabMap(cfg) {
   const m = {};
   for (const v of cfg.vocab || []) m[v.name] = v;
+  // 完整词库（原稿 254 词表）：不参与「给模型选词」的提示词，但注入提示、面板手动注入都能用
+  for (const v of cfg.vocabExtra || []) if (!m[v.name]) m[v.name] = v;
   return m;
 }
 

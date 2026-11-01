@@ -54,6 +54,7 @@
   .lvdots { letter-spacing: 2px; font-size: 11px; }
   .k-pos { color: var(--pos); } .k-neg { color: var(--neg); } .k-think { color: var(--think); }
   .k-social { color: var(--social); } .k-subtle { color: var(--subtle); } .k-combo { color: var(--combo); }
+  .k-extra { color: var(--dim); }
   .calm { color: var(--dim); font-size: 14px; }
   /* 状态 */
   .spirit-big { font-size: 40px; font-weight: 700; }
@@ -151,7 +152,7 @@
 </div>
 
 <script>
-const KIND = { pos:'正向', neg:'负面', think:'思考', social:'社交', subtle:'细微', combo:'复合' };
+const KIND = { pos:'正向', neg:'负面', think:'思考', social:'社交', subtle:'细微', combo:'复合', extra:'完整词库' };
 let cfg = null, st = null;
 
 async function getState() {
