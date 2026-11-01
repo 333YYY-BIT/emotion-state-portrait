@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小鲸 · 情绪与状态面板</title>
+<style>
+  :root {
+    --bg: #0b1626; --bg2: #0f2036; --card: #132a44; --line: #1f3d5e;
+    --text: #dbe8f5; --dim: #8fa8c4; --accent: #5fc3e8;
+    --pos: #6fd6a0; --neg: #ff8f8f; --think: #9db8ff; --social: #ffd27e;
+    --subtle: #c9a7ff; --combo: #ff9ecb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: radial-gradient(1200px 500px at 20% -10%, #14324f 0%, var(--bg) 55%);
+    color: var(--text); font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  header h1 { font-size: 22px; margin: 0; }
+  header .sub { color: var(--dim); font-size: 13px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: #35c96a; margin-right: 6px; box-shadow: 0 0 8px #35c96a; }
+  .dot.stale { background: #e0a53f; box-shadow: 0 0 8px #e0a53f; }
+  button {
+    background: #1d3a5c; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 14px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { background: #26496f; }
+  button.primary { background: #1f6f9f; border-color: #2c86bd; }
+  button.primary:hover { background: #2c86bd; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: linear-gradient(180deg, var(--card), var(--bg2));
+    border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--accent); font-weight: 600; }
+  .card h2 .tag { color: var(--dim); font-size: 12px; font-weight: normal; margin-left: 8px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+  /* 情绪 chips */
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #10243c; border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 14px; margin: 4px 8px 4px 0;
+  }
+  .chip .name { font-size: 15px; font-weight: 600; }
+  .chip .cue { color: var(--dim); font-size: 12px; }
+  .lvdots { letter-spacing: 2px; font-size: 11px; }
+  .k-pos { color: var(--pos); } .k-neg { color: var(--neg); } .k-think { color: var(--think); }
+  .k-social { color: var(--social); } .k-subtle { color: var(--subtle); } .k-combo { color: var(--combo); }
+  .calm { color: var(--dim); font-size: 14px; }
+  /* 状态 */
+  .spirit-big { font-size: 40px; font-weight: 700; }
+  .bar { height: 12px; border-radius: 6px; background: #0d1c30; border: 1px solid var(--line); overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 6px; transition: width .6s; }
+  .status-badge {
+    display: inline-block; padding: 5px 12px; border-radius: 999px; font-size: 14px; font-weight: 600;
+  }
+  .kv { font-size: 13px; color: var(--dim); margin: 6px 0; }
+  .kv b { color: var(--text); font-weight: 600; }
+  .factor-line { margin-top: 10px; font-size: 12.5px; color: var(--dim); border-top: 1px dashed var(--line); padding-top: 8px; }
+  /* 画像 */
+  .person { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: #10243c; }
+  .person .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .person .pname { font-size: 15px; font-weight: 700; }
+  .person .famword { color: var(--accent); font-size: 12px; }
+  .mini-bar { height: 6px; border-radius: 3px; background: #0d1c30; overflow: hidden; margin: 3px 0 8px; }
+  .mini-bar > i { display: block; height: 100%; }
+  .prow { font-size: 12px; color: var(--dim); margin: 4px 0; }
+  .prow b { color: var(--text); }
+  .tag { display: inline-block; background: #1a3a5c; border-radius: 6px; padding: 2px 8px; font-size: 12px; margin: 2px 4px 2px 0; }
+  .bias { display: inline-block; background: #27405c; border: 1px solid #3a5c80; border-radius: 6px; padding: 2px 8px; font-size: 12px; margin: 2px 4px 2px 0; color: var(--social); }
+  .psumm { font-size: 13px; color: var(--text); margin: 6px 0; }
+  /* 时间线 */
+  .hist { max-height: 320px; overflow-y: auto; }
+  .hrow { display: flex; gap: 10px; font-size: 12.5px; padding: 7px 2px; border-bottom: 1px solid #12233b; flex-wrap: wrap; align-items: baseline; }
+  .hrow .t { color: var(--dim); }
+  .hrow .m { font-weight: 600; }
+  .hrow .d-down { color: var(--neg); } .hrow .d-up { color: var(--pos); }
+  .hrow .note { color: var(--dim); width: 100%; }
+  /* 工具箱 */
+  .tools { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  select, input[type=number] {
+    background: #0f2036; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px;
+  }
+  input[type=range] { width: 180px; }
+  .clickable { cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🐳 小鲸 · 情绪与状态面板</h1>
+  <span class="sub"><span class="dot" id="liveDot"></span><span id="updatedAt">—</span></span>
+  <button class="primary" onclick="doUpdate()">立即刷新一轮</button>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <h2>💗 现在情绪<span class="tag">最多 3 个叠加 · Lv1~4</span></h2>
+    <div id="moodBox"><span class="calm">加载中…</span></div>
+  </div>
+
+  <div class="card">
+    <h2>⚡ AI 状态<span class="tag">精神值 0~100</span></h2>
+    <div class="row">
+      <div class="spirit-big" id="spiritNum">—</div>
+      <div style="flex:1;min-width:220px">
+        <div class="bar"><i id="spiritBar" style="width:0%"></i></div>
+        <div class="kv" style="margin-top:6px">当前状态：<span class="status-badge" id="statusBadge">—</span></div>
+        <div class="kv" id="statusCue"></div>
+      </div>
+    </div>
+    <div class="kv" id="tickInfo"></div>
+    <div class="factor-line" id="factorLine"></div>
+  </div>
+
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>👤 人物画像<span class="tag">熟度决定情绪等级上限与消耗系数</span></h2>
+    <div id="portraitBox"><span class="calm">还没有画像，聊起来就有了</span></div>
+  </div>
+
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>🕐 情绪时间线<span class="tag">最近 30 条</span></h2>
+    <div class="hist" id="histBox"></div>
+  </div>
+
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>🧰 工具箱<span class="tag">改动立即写 mood.txt，她下一句就变</span></h2>
+    <div class="tools">
+      <button onclick="tweak('boost')">提神 +20</button>
+      <button onclick="tweak('rest')">休息 +30</button>
+      <button onclick="tweak('clear')">一键平静</button>
+      <span style="color:var(--dim);font-size:13px">精神值</span>
+      <input type="range" id="spiritRange" min="0" max="100" value="78" oninput="document.getElementById('spiritVal').textContent=this.value">
+      <span id="spiritVal" style="font-size:13px;min-width:28px">78</span>
+      <button onclick="tweak('spirit', document.getElementById('spiritRange').value)">设定</button>
+      <span style="color:var(--dim);font-size:13px;margin-left:8px">注入情绪</span>
+      <select id="vocabSel"></select>
+      <select id="lvSel"><option>1</option><option selected>2</option><option>3</option><option>4</option></select>
+      <button class="primary" onclick="tweak('add', document.getElementById('vocabSel').value, document.getElementById('lvSel').value)">注入</button>
+    </div>
+    <div class="kv" style="margin-top:10px" id="forgetRow"></div>
+  </div>
+</div>
+
+<script>
+const KIND = { pos:'正向', neg:'负面', think:'思考', social:'社交', subtle:'细微', combo:'复合' };
+let cfg = null, st = null;
+
+async function getState() {
+  const r = await fetch('/api/state');
+  return r.json();
+}
+async function tweak(action, value, extra) {
+  const r = await fetch('/api/tweak', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, value, extra }),
+  });
+  const j = await r.json();
+  if (!j.ok) { alert(j.error || '失败'); return; }
+  await refresh();
+}
+async function doUpdate() {
+  const r = await fetch('/api/update', { method: 'POST' });
+  const j = await r.json();
+  if (!j.ok) { alert(j.error || '刷新失败'); return; }
+  await refresh();
+}
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function lvDots(lv) {
+  let s = '';
+  for (let i = 1; i <= 4; i++) s += i <= lv ? '●' : '○';
+  return s;
+}
+function spiritColor(v) {
+  if (v >= 80) return '#6fd6a0';
+  if (v >= 60) return '#5fc3e8';
+  if (v >= 40) return '#ffd27e';
+  if (v >= 20) return '#ff9e6b';
+  return '#9aa7b8';
+}
+function render() {
+  if (!st || !cfg) return;
+  document.getElementById('updatedAt').textContent =
+    '最后更新 ' + (st.updatedAt ? new Date(st.updatedAt).toLocaleTimeString('zh-CN') : '—');
+  const fresh = Date.now() - (st.updatedAt || 0) < 25 * 60 * 1000;
+  document.getElementById('liveDot').className = 'dot' + (fresh ? '' : ' stale');
+
+  // 情绪
+  const mb = document.getElementById('moodBox');
+  if (!st.mood || !st.mood.length) {
+    mb.innerHTML = '<span class="calm">平静 —— 没有正在活跃的情绪</span>';
+  } else {
+    const vm = {};
+    (cfg.vocab || []).forEach((v) => { vm[v.name] = v; });
+    mb.innerHTML = st.mood.map((m) => {
+      const v = vm[m.name] || {};
+      const cue = (v.cue || '').split(/[，。；]/)[0].slice(0, 14);
+      return '<span class="chip"><span class="k-' + (v.kind || 'pos') + '">●</span>'
+        + '<span class="name">' + escapeHtml(m.name) + '</span>'
+        + '<span class="lvdots k-' + (v.kind || 'pos') + '">' + lvDots(Math.round(m.level)) + '</span>'
+        + '<span class="cue">' + escapeHtml(cue) + '</span></span>';
+    }).join('');
+  }
+
+  // 状态
+  const sp = st.spirit;
+  document.getElementById('spiritNum').textContent = sp;
+  document.getElementById('spiritNum').style.color = spiritColor(sp);
+  const bar = document.getElementById('spiritBar');
+  bar.style.width = sp + '%';
+  bar.style.background = spiritColor(sp);
+  const sb = document.getElementById('statusBadge');
+  sb.textContent = (st.status && st.status.word) || '—';
+  sb.style.background = 'rgba(95,195,232,.15)';
+  sb.style.color = st.status && st.status.special ? '#ffd27e' : spiritColor(sp);
+  document.getElementById('statusCue').innerHTML = st.status && st.status.cue ? escapeHtml(st.status.cue) : '';
+  const t = st.lastTick || {};
+  let tickHtml = '';
+  if (t.chat) {
+    tickHtml = '刚和 <b>' + escapeHtml((st.portraits[t.chat] || {}).name || t.chat) + '</b> 聊完：'
+      + '情绪切换 <b>' + (t.switches || 0) + '</b> 次，认知负荷 <b>' + Math.round((t.load || 0) * 100) + '%</b>'
+      + (t.cost ? '，本回合精神 <span class="d-down">−' + t.cost + '</span>' : '');
+  } else if (t.recovered) {
+    tickHtml = '最近平静，精神慢慢恢复中 <span class="d-up">（+恢复）</span>';
+  }
+  if (t.note) tickHtml += '　·　<b>她记着：</b>' + escapeHtml(t.note);
+  document.getElementById('tickInfo').innerHTML = tickHtml;
+
+  // 叠加系数
+  const p = cfg.personality || {};
+  let fl = '叠加规则：性格 <b>' + escapeHtml(p.name) + '</b>（每次情绪切换消耗 ' + p.churnCost
+    + '，满负荷思考消耗 ' + p.loadCost + '，恢复 +' + p.recovery + '）';
+  const aff = p.emotionAffinity || {};
+  if ((aff.boost || []).length || (aff.damp || []).length) {
+    fl += '；性格情绪倾向：容易点燃 <b>' + escapeHtml((aff.boost || []).join('、')) + '</b>'
+      + ((aff.damp || []).length ? '，不易点燃 <b>' + escapeHtml((aff.damp || []).join('、')) + '</b>' : '');
+  }
+  const qq = t.chat;
+  const per = qq ? st.portraits[qq] : null;
+  if (per) {
+    const fam = Number(per.familiarity) || 0;
+    const f = cfg.portraitFactor || { base: 0.6, perFamiliarity: 0.008, max: 1.4 };
+    const factor = Math.min(f.max, f.base + fam * f.perFamiliarity).toFixed(2);
+    const cap = (cfg.capByFamiliarity || []).slice().sort((a, b) => b.min - a.min).find((c) => fam >= c.min);
+    let capv = cap ? cap.cap : 2;
+    if (p.empathyBonus && fam >= 60) capv = Math.min(4, capv + 1);
+    fl += '；对 <b>' + escapeHtml(per.name) + '</b>：精神消耗 ×<b>' + factor + '</b>，情绪等级上限 <b>Lv' + capv + '</b>'
+      + (fam >= 30 && per.emotionBias && per.emotionBias.length ? '，画像倾向情绪再 <b>+1</b>（可与性格叠加）' : '');
+  }
+  document.getElementById('factorLine').innerHTML = fl;
+
+  // 画像
+  const pb = document.getElementById('portraitBox');
+  const keys = Object.keys(st.portraits || {});
+  if (!keys.length) {
+    pb.innerHTML = '<span class="calm">还没有画像 —— 等她跟人聊起来，每 15 分钟攒一点</span>';
+  } else {
+    pb.innerHTML = keys.map((qq) => {
+      const x = st.portraits[qq];
+      const fam = Math.round(Number(x.familiarity) || 0);
+      const bond = Math.round(Number(x.bond) || 0);
+      const famword = fam >= 60 ? '很熟 · 共情加倍' : fam >= 30 ? '慢慢熟起来了' : '还不太熟 · 情绪偏克制';
+      const tags = (arr, label, color) => (arr && arr.length)
+        ? '<div class="prow"><b style="color:' + color + '">' + label + '</b> ' + arr.map((t) => '<span class="tag">' + escapeHtml(t) + '</span>').join('') + '</div>' : '';
+      return '<div class="person"><div class="head"><span class="pname">' + escapeHtml(x.name) + '</span>'
+        + '<span class="famword">' + famword + '</span>'
+        + '<span class="kv">熟度 ' + fam + '/100</span><span class="kv">羁绊 ' + bond + '/100</span></div>'
+        + '<div class="mini-bar"><i style="width:' + fam + '%;background:#5fc3e8"></i></div>'
+        + '<div class="mini-bar"><i style="width:' + bond + '%;background:#ff9ecb"></i></div>'
+        + (x.summary ? '<div class="psumm">' + escapeHtml(x.summary) + '</div>' : '')
+        + tags(x.likes, '喜欢', 'var(--pos)')
+        + tags(x.sensitivities, '敏感点', 'var(--neg)')
+        + tags(x.triggers, '容易应激', 'var(--social)')
+        + tags(x.topics, '常聊', 'var(--think)')
+        + (x.emotionBias && x.emotionBias.length ? '<div class="prow"><b>面对 TA 更容易触发</b> '
+          + x.emotionBias.map((b) => '<span class="bias">' + escapeHtml(b) + '</span>').join('') + '</div>' : '')
+        + '</div>';
+    }).join('');
+  }
+
+  // 时间线
+  const hb = document.getElementById('histBox');
+  const hist = window._hist || [];
+  if (!hist.length) {
+    hb.innerHTML = '<span class="calm">暂无记录，等第一轮 update</span>';
+  } else {
+    hb.innerHTML = hist.map((h) => {
+      const d = h.delta;
+      const dd = d < 0 ? '<span class="d-down">精神 −' + Math.abs(d) + '</span>'
+        : d > 0 ? '<span class="d-up">恢复</span>' : '';
+      return '<div class="hrow"><span class="t">' + new Date(h.t).toLocaleTimeString('zh-CN', { hour12: false }) + '</span>'
+        + '<span class="m">' + escapeHtml(h.mood) + '</span>'
+        + '<span>' + escapeHtml(h.status) + '</span><span>精神 ' + h.spirit + '</span>' + dd
+        + (h.chat ? '<span>' + escapeHtml(h.chat) + '</span>' : '')
+        + (h.note ? '<span class="note">' + escapeHtml(h.note) + '</span>' : '')
+        + '</div>';
+    }).join('');
+  }
+
+  // 忘记情绪 chips
+  const fr = document.getElementById('forgetRow');
+  fr.innerHTML = (st.mood && st.mood.length)
+    ? '<span style="color:var(--dim);font-size:12px">忘掉某个情绪：</span>' + st.mood.map((m) =>
+      '<button class="clickable" onclick="tweak(\'forget\', \'' + escapeHtml(m.name) + '\')">' + escapeHtml(m.name) + ' ×</button>').join(' ')
+    : '';
+
+  // 滑块同步
+  const rg = document.getElementById('spiritRange');
+  if (document.activeElement !== rg) { rg.value = sp; document.getElementById('spiritVal').textContent = sp; }
+}
+function buildVocab() {
+  const sel = document.getElementById('vocabSel');
+  const groups = {};
+  (cfg.vocab || []).forEach((v) => {
+    (groups[v.kind] = groups[v.kind] || []).push(v.name);
+  });
+  sel.innerHTML = Object.keys(groups).map((k) =>
+    '<optgroup label="' + KIND[k] + '">' + groups[k].map((n) => '<option>' + escapeHtml(n) + '</option>').join('') + '</optgroup>'
+  ).join('');
+}
+async function refresh() {
+  try {
+    const j = await getState();
+    st = j.state;
+    window._hist = j.history;
+    if (!cfg) { cfg = j.config; buildVocab(); }
+    else cfg = j.config;
+    render();
+  } catch (e) { /* 面板离线时静默 */ }
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

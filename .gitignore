@@ -1,0 +1,6 @@
+node_modules/
+emotion/state.json
+emotion/state*.bak*
+mood.txt
+*.log
+.DS_Store
