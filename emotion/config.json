@@ -6,10 +6,10 @@
   "personality": {
     "name": "敏感型",
     "desc": "情绪波动很消耗精神，容易进入微微疲惫；对熟悉在意的人共情深，情绪等级上限+1",
-    "churnCost": 9,
-    "loadCost": 32,
-    "intenseCost": 4,
-    "recovery": 5,
+    "churnCost": 5,
+    "loadCost": 24,
+    "intenseCost": 3,
+    "recovery": 8,
     "baselineSpirit": 78,
     "empathyBonus": true,
     "emotionAffinity": {
