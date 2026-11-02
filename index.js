@@ -42,7 +42,7 @@ function emotionStatusTool() {
         mood: { type: 'array', items: { type: 'string' } },
         portraits: { type: 'array', items: { type: 'string' } },
       },
-    } },
+    }, render: (_args, value) => [{ type: 'text', text: value.text }] },
     async execute() {
       const e = await engine()
       const st = e.loadState()
@@ -77,7 +77,7 @@ function emotionTweakTool() {
     output: { schema: {
       type: 'object', additionalProperties: false,
       properties: { ok: { type: 'boolean' }, text: { type: 'string' } },
-    } },
+    }, render: (_args, value) => [{ type: 'text', text: value.text }] },
     async execute(args) {
       const e = await engine()
       const st = e.loadState()
@@ -98,7 +98,7 @@ function emotionUpdateTool() {
     output: { schema: {
       type: 'object', additionalProperties: false,
       properties: { ok: { type: 'boolean' }, text: { type: 'string' } },
-    } },
+    }, render: (_args, value) => [{ type: 'text', text: value.text }] },
     async execute() {
       const e = await engine()
       const st = await e.runUpdateOnce()
