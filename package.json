@@ -3,13 +3,18 @@
   "version": "1.0.0",
   "description": "情绪 · 状态 · 人物画像引擎：给 LLM 角色情绪连续性、精神值状态与按人画像，file 模式可接任何 AI",
   "type": "module",
-  "main": "qq-emotion.mjs",
+  "main": "index.js",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "scripts": {
     "update": "node qq-emotion.mjs update",
     "status": "node qq-emotion.mjs status",
     "ui": "node qq-emotion-ui.mjs"
   },
-  "keywords": ["ai", "emotion", "mood", "persona", "llm", "roleplay"],
+  "keywords": ["ai", "emotion", "mood", "persona", "llm", "roleplay", "dsh-plugin"],
   "license": "MIT",
   "optionalDependencies": {
     "ws": "^8.18.0"
