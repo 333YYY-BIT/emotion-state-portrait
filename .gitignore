@@ -4,3 +4,7 @@ emotion/state*.bak*
 mood.txt
 *.log
 .DS_Store
+mood.txt
+mood-map.json
+emotion.log
+emotion/state.json
