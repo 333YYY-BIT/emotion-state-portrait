@@ -38,7 +38,13 @@ import { createRequire } from 'node:module';
 const require = createRequire(
   'file:///C:/Users/YangXinYuan/.dsh/profiles/desktop/node_modules/dsh-onebot-qq/lib/index.js',
 );
-const WebSocket = require('ws');
+// OneBot 模式才需要 ws；file 模式/插件环境可能没有它，别让它炸掉整个引擎
+let WebSocket = null;
+try {
+  WebSocket = require('ws');
+} catch {
+  WebSocket = null;
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EMOTION_DIR = join(HERE, 'emotion');
@@ -122,6 +128,10 @@ function friendsMap() {
 // ── NapCat WS ──────────────────────────────────────────────────────
 function callApi(action, params) {
   return new Promise((resolvePromise, rejectPromise) => {
+    if (!WebSocket) {
+      rejectPromise(new Error('ws 未安装，OneBot 模式不可用（file 模式不需要）'));
+      return;
+    }
     const echo = 'em-' + Math.random().toString(36).slice(2);
     const ws = new WebSocket(WS_URL, { headers: { Authorization: 'Bearer ' + TOKEN } });
     let done = false;
