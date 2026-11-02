@@ -1,0 +1,7 @@
+# emotion-state-portrait bundle patch: inserts the host row into the profile's
+# plugin roster. Install with `dsh plugin --profile <name> add github:333YYY-BIT/emotion-state-portrait`;
+# the bundle patch is applied automatically, do NOT insert this row again manually
+# (duplicate ids crash the loader).
+- insert:
+    - id: emotion-state-portrait
+      name: 'emotion-state-portrait'
