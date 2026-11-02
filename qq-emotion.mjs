@@ -421,7 +421,7 @@ export function applyScore(st, cfg, chat, sc, tick) {
         near.level = clamp(near.level - 1, 1, cap); // 继承相近情绪等级并减一
         near.at = nowAt;
       } else if (st.mood.length >= (cfg.mood?.maxActive ?? 3)) {
-        // 没有相近的：顶掉最早出现的那个（at 最小），从 1 级开始
+        // 没有相近的：顶掉最早出现的那个，从 1 级开始
         let oldest = st.mood[0];
         for (const m of st.mood) if ((m.at ?? 0) < (oldest.at ?? 0)) oldest = m;
         oldest.name = name;
@@ -439,8 +439,9 @@ export function applyScore(st, cfg, chat, sc, tick) {
   const load = clamp(Number(sc.load) || 0, 0, 1);
   const intense = st.mood.filter((m) => m.level >= 3).length;
   const pf = portraitFactor(cfg, fam);
+  const base = Number(cfg.personality?.baseCost) || 0; // 陪聊基础消耗：平静聊天也不是零成本
   const cost = Math.round(
-    (switches * cfg.personality.churnCost + load * cfg.personality.loadCost + intense * cfg.personality.intenseCost) * pf,
+    (base + switches * cfg.personality.churnCost + load * cfg.personality.loadCost + intense * cfg.personality.intenseCost) * pf,
   );
   st.spirit = clamp(st.spirit - cost, 0, 100);
   tick.switches = switches;
