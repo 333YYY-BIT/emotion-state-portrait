@@ -387,7 +387,7 @@ function applyPortrait(st, cfg, qq, d) {
   p.updatedAt = Date.now();
 }
 
-function applyScore(st, cfg, chat, sc, tick) {
+export function applyScore(st, cfg, chat, sc, tick) {
   decayMood(st, cfg);
   const fam = Number((st.portraits[chat.qq] || {}).familiarity) || 5;
   const cap = levelCap(cfg, fam);
@@ -408,8 +408,29 @@ function applyScore(st, cfg, chat, sc, tick) {
     lv = clamp(lv, 1, cap);
     if (lv !== rawLv) maps.push(name + rawLv + '→' + lv);
     const ex = st.mood.find((m) => m.name === name);
-    if (ex) ex.level = Math.max(ex.level, lv);
-    else st.mood.push({ name, level: lv });
+    if (ex) {
+      ex.level = Math.max(ex.level, lv);
+    } else {
+      // 新情绪：先看有没有「相近」的同类（vocab.kind 相同）已生效 → 取代它，等级降一级
+      const vm = vocabMap(cfg);
+      const kind = (vm[name] && vm[name].kind) || '';
+      const near = kind ? st.mood.find((m) => m.name !== name && ((vm[m.name] && vm[m.name].kind) || '') === kind) : null;
+      const nowAt = Date.now();
+      if (near) {
+        near.name = name;
+        near.level = clamp(near.level - 1, 1, cap); // 继承相近情绪等级并减一
+        near.at = nowAt;
+      } else if (st.mood.length >= (cfg.mood?.maxActive ?? 3)) {
+        // 没有相近的：顶掉最早出现的那个（at 最小），从 1 级开始
+        let oldest = st.mood[0];
+        for (const m of st.mood) if ((m.at ?? 0) < (oldest.at ?? 0)) oldest = m;
+        oldest.name = name;
+        oldest.level = 1;
+        oldest.at = nowAt;
+      } else {
+        st.mood.push({ name, level: lv, at: nowAt });
+      }
+    }
   }
   st.mood.sort((a, b) => b.level - a.level);
   st.mood = st.mood.slice(0, cfg.mood?.maxActive ?? 3);
