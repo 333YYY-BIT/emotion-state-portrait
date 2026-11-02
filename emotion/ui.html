@@ -116,6 +116,8 @@
         <div class="bar"><i id="spiritBar" style="width:0%"></i></div>
         <div class="kv" style="margin-top:6px">当前状态：<span class="status-badge" id="statusBadge">—</span></div>
         <div class="kv" id="statusCue"></div>
+        <div class="kv" id="transLine" style="color:#ffd27e;font-weight:600"></div>
+        <div class="kv" id="streakLine" style="color:var(--dim);font-size:12px"></div>
       </div>
     </div>
     <div class="kv" id="tickInfo"></div>
@@ -225,6 +227,12 @@ function render() {
   sb.style.background = 'rgba(95,195,232,.15)';
   sb.style.color = st.status && st.status.special ? '#ffd27e' : spiritColor(sp);
   document.getElementById('statusCue').innerHTML = st.status && st.status.cue ? escapeHtml(st.status.cue) : '';
+  const tr = st.transition;
+  document.getElementById('transLine').innerHTML = tr
+    ? '✨ 状态跃迁：' + escapeHtml(tr.name) + '（剩余约 ' + Math.max(1, Math.round((tr.until - Date.now()) / 60000)) + ' 分钟）'
+    : '';
+  const sk = st.streak || {};
+  document.getElementById('streakLine').innerHTML = '连击：正向 ' + (sk.pos || 0) + ' · 负面 ' + (sk.neg || 0) + ' · 生气 ' + (sk.angry || 0);
   const t = st.lastTick || {};
   let tickHtml = '';
   if (t.chat) {

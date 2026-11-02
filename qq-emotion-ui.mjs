@@ -35,6 +35,8 @@ function apiState() {
       status: st.status,
       lastTick: st.lastTick,
       portraits: st.portraits,
+      transition: st.transition || null,
+      streak: st.streak || { pos: 0, neg: 0, angry: 0 },
     },
     config: {
       personality: cfg.personality,
@@ -42,7 +44,7 @@ function apiState() {
       specialStatus: cfg.specialStatus,
       capByFamiliarity: cfg.capByFamiliarity,
       portraitFactor: cfg.portraitFactor,
-      vocab: cfg.vocab,
+      vocab: [...(cfg.vocab || []), ...(cfg.vocabExtra || [])],
     },
     history: hist,
   };

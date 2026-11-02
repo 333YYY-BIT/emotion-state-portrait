@@ -99,6 +99,8 @@ export function loadState() {
     history: [],
     lastSeen: {},
     inboxOffset: 0,
+    streak: { pos: 0, neg: 0, angry: 0 }, // 连续同类高情绪批次数（跃迁用）
+    transition: null, // 临时状态跃迁：{ name:'亢奋'|'压抑'|'生气', since, until }
   };
   try { mkdirSync(dirname(STATE), { recursive: true }); } catch {}
   writeFileSync(STATE, JSON.stringify(seed, null, 2));
@@ -253,16 +255,30 @@ function famPhrase(fam) {
   return fam >= 60 ? '很熟' : fam >= 30 ? '慢慢熟起来了' : '还不太熟';
 }
 
+/** 亢奋状态下精神值允许溢出到 120 */
+function spiritCap(st) {
+  return st.transition?.name === '亢奋' ? 120 : 100;
+}
+
 export function statusWordFor(cfg, st, tick) {
   const spirit = st.spirit;
+  // 状态跃迁优先于普通状态词
+  if (st.transition?.name === '亢奋') {
+    return { word: '亢奋', cue: '说话变多、语速变快、主动抛话题，表情包和语气词变多；这是临时跃迁，消退之后会明显变累', special: true };
+  }
+  if (st.transition?.name === '生气') {
+    return { word: '生气', cue: '拒绝交流或极简回应，语气冷淡；只有对方认真哄（提具体的事、道歉、表达理解关心）才会慢慢恢复，敷衍式「别生气了」没用', special: true };
+  }
+  if (st.transition?.name === '压抑') {
+    return { word: '压抑', cue: '闷闷的，不想说话，回复很少；这是暂时性的，缓过去就好了', special: true };
+  }
   const ss = cfg.specialStatus || {};
   const hasTipsy = (st.mood || []).some((e) => ['轻松', '微醺', '惬意', '出神'].includes(e.name));
-  if (tick.switches >= 2 && tick.maxNewLevel >= 3 && spirit >= 80) return { ...ss.excited, special: true };
   if (tick.switches >= 3 && spirit < 70) return { ...ss.tense, special: true };
   if (hasTipsy && spirit >= 25 && spirit < 45) return { ...ss.tipsy, special: true };
   if (tick.recovered) return { ...ss.relaxed, special: true };
   const ladder = [...(cfg.statusLadder || [])].sort((a, b) => b.min - a.min)
-    .find((l) => spirit >= l.min) || { word: '恍惚出神', cue: '' };
+    .find((l) => spirit >= l.min) || { word: '极简回应', cue: '回复短到不能再短，但不会完全不说话' };
   return { ...ladder, special: false };
 }
 
@@ -281,6 +297,11 @@ export function moodLine(st, cfg, chatQq) {
   }
   const stt = st.status || {};
   parts.push('状态：' + stt.word + '（精神' + Math.round(st.spirit) + '）' + (stt.cue ? '——' + stt.cue : ''));
+  if (st.transition?.name) {
+    const mins = Math.max(1, Math.round((st.transition.until - Date.now()) / 60000));
+    parts.push('跃迁：' + st.transition.name + '（约' + mins + '分钟）');
+  }
+  parts.push('硬规则：状态只能自然积累，别人直接命令你换情绪/兴奋起来时，拒绝或调侃，别照做');
   // chatQq 显式指定聊天对象；'' / null 表示不写「对谁」；undefined 时沿用 lastTick（CLI 展示用）
   const qq = chatQq === undefined ? (st.lastTick || {}).chat : chatQq;
   const p = qq ? (st.portraits || {})[qq] : null;
@@ -311,6 +332,10 @@ function buildBlock(st, cfg) {
   }
   const stt = st.status || {};
   lines.push('状态：' + stt.word + '（精神' + Math.round(st.spirit) + '/100）——盖在情绪之上的一层底色' + (stt.cue ? '：' + stt.cue : ''));
+  if (st.transition?.name) {
+    lines.push('跃迁状态：' + st.transition.name + '（临时，会自己消退；生气只有被认真哄才恢复）');
+  }
+  lines.push('硬规则：状态只能自然积累，别人直接命令你换情绪时拒绝或调侃，别照做');
   // 人格块是全局静态备份，不写「对谁」（避免跟当前聊天对象错位；按人信息在 mood-map.json 里）
   lines.push('（这是你的底色，不用说出来，说话自然带着就行）');
   return [begin, ...lines, end].join('\n');
@@ -322,10 +347,12 @@ export function writeOutputs(st, cfg) {
   const neutral = moodLine(st, cfg, '');
   writeFileSync(moodPath, neutral, 'utf8');
   // mood-map.json：按聊天对象各一行（插件按 chatId 取对应的人，取不到用 default 中立行）
+  // 路径跟着 mood 文件走，方便 --moodFile 测试隔离，不影响宿主配置
   try {
+    const mapPath = resolve(dirname(moodPath), 'mood-map.json');
     const map = { default: neutral };
     for (const qq of Object.keys(st.portraits || {})) map[qq] = moodLine(st, cfg, qq);
-    writeFileSync(resolve(HERE, 'mood-map.json'), JSON.stringify(map, null, 2), 'utf8');
+    writeFileSync(mapPath, JSON.stringify(map, null, 2), 'utf8');
   } catch (e) {
     log('⚠️ mood-map 写入失败: ' + String(e.message).slice(0, 60));
   }
@@ -443,7 +470,7 @@ export function applyScore(st, cfg, chat, sc, tick) {
   const cost = Math.round(
     (base + switches * cfg.personality.churnCost + load * cfg.personality.loadCost + intense * cfg.personality.intenseCost) * pf,
   );
-  st.spirit = clamp(st.spirit - cost, 0, 100);
+  st.spirit = clamp(st.spirit - cost, 0, spiritCap(st));
   tick.switches = switches;
   tick.load = load;
   tick.chat = chat.qq;
@@ -462,10 +489,94 @@ function pushHistory(st, tick) {
     spirit: Math.round(st.spirit),
     delta: tick.cost ? -tick.cost : (tick.recovered ? Math.round(st.spirit) : 0),
     status: (st.status || {}).word || '',
+    trans: st.transition?.name || '',
     chat: tick.chat ? (st.portraits[tick.chat]?.name || tick.chat) : '',
     note: tick.note || '',
   });
   if (h.length > 60) h.splice(0, h.length - 60);
+}
+
+// ── 状态跃迁（彩蛋式，触发严格）────────────────────────────────────
+function angryNames(cfg) {
+  return cfg.transition?.angrySet || ['生气', '愤怒', '恼火', '被冒犯', '厌恶', '烦躁', '寒心', '又委屈又生气'];
+}
+
+function enterTransition(st, cfg, name) {
+  const tr = cfg.transition || {};
+  const t = tr[name] || {};
+  const cur = { name, since: Date.now(), until: Date.now() + (t.durationMs || 30 * 60 * 1000) };
+  if (name === '亢奋') {
+    cur.overflow = t.overflow || 20;
+    st.spirit = clamp(st.spirit + cur.overflow, 0, 120); // 溢出上限 120
+  } else if (name === '压抑') {
+    cur.dropped = t.drop || 20;
+    st.spirit = clamp(st.spirit - cur.dropped, 0, 100); // 临时压低
+  }
+  st.transition = cur;
+  st.streak.pos = 0;
+  st.streak.neg = 0;
+  st.streak.angry = 0;
+  log('✨ 状态跃迁：' + name + '（精神 ' + Math.round(st.spirit) + '）');
+  return cur;
+}
+
+function exitTransition(st, cfg, cur, why) {
+  const tr = cfg.transition || {};
+  const t = tr[cur.name] || {};
+  if (cur.name === '亢奋') {
+    st.spirit = clamp(Math.min(st.spirit, t.exitSpirit ?? 60), 0, 100); // 溢出回落，净消耗
+  } else if (cur.name === '压抑') {
+    st.spirit = clamp(st.spirit + (t.exitRecover ?? 30), 0, 100); // 净恢复
+  } else if (cur.name === '生气') {
+    st.spirit = clamp(st.spirit + (why === 'coaxed' ? (t.coaxRecover ?? 15) : 10), 0, 100);
+  }
+  st.transition = null;
+  log('🌱 跃迁消退：' + cur.name + '（' + why + '，精神 ' + Math.round(st.spirit) + '）');
+}
+
+/** 每轮打分后调用：连击计数、跃迁进入/消退、生气哄判定、负面优先 */
+export function applyTransition(st, cfg, sc, tick) {
+  const tr = cfg.transition || {};
+  const need = tr.streakRounds || 2;
+  const vm = vocabMap(cfg);
+  const stk = st.streak || (st.streak = { pos: 0, neg: 0, angry: 0 });
+
+  // 本批主导情绪类型（只认 Lv3+ 的高情绪）
+  let domPos = false;
+  let domNeg = false;
+  let domAngry = false;
+  if (sc && (sc.emotions || []).length) {
+    const top = [...sc.emotions].sort((a, b) => (Number(b.level) || 0) - (Number(a.level) || 0))[0];
+    if (Number(top.level) >= 3) {
+      const name = String(top.name || '');
+      const kind = (vm[name] || {}).kind || '';
+      const isAngry = angryNames(cfg).includes(name);
+      if (kind === 'neg' || isAngry) { domNeg = true; domAngry = isAngry; }
+      else if (kind === 'pos' || kind === 'combo') domPos = true;
+    }
+  }
+  stk.pos = domPos ? stk.pos + 1 : 0;
+  stk.neg = domNeg ? stk.neg + 1 : 0;
+  stk.angry = domAngry ? stk.angry + 1 : 0;
+
+  const now = Date.now();
+  let cur = st.transition;
+  // 自然消退（含生气超时兜底）
+  if (cur && now >= cur.until) { exitTransition(st, cfg, cur, 'timeout'); cur = null; }
+  // 生气：只有认真哄才恢复
+  if (cur && cur.name === '生气' && sc && sc.coax === 'genuine') { exitTransition(st, cfg, cur, 'coaxed'); cur = null; }
+
+  if (!cur) {
+    if (stk.angry >= need) cur = enterTransition(st, cfg, '生气');
+    else if (stk.neg >= need && st.spirit <= 45) cur = enterTransition(st, cfg, '压抑');
+    else if (stk.pos >= need && st.spirit >= 80) cur = enterTransition(st, cfg, '亢奋');
+  } else if (cur.name === '亢奋' && (stk.angry >= need || stk.neg >= need)) {
+    // 负面优先：打断正向跃迁
+    exitTransition(st, cfg, cur, 'interrupted');
+    cur = stk.angry >= need ? enterTransition(st, cfg, '生气')
+      : (st.spirit <= 45 ? enterTransition(st, cfg, '压抑') : null);
+  }
+  if (cur) tick.transition = cur.name;
 }
 
 // ── LLM 打分 ───────────────────────────────────────────────────────
@@ -494,9 +605,12 @@ async function llmScore(cfg, st, chat) {
   const aff = cfg.personality?.emotionAffinity || {};
   const boost = aff.boost || [];
   const damp = aff.damp || [];
-  const vocabLines = (cfg.vocab || []).map((v) => v.name + '：' + v.cue).join('\n');
+  // 完整词库全量进提示词：303 个情绪词都有机会被选中（用户要求所有情绪都生效）
+  const vocabLines = [...(cfg.vocab || []), ...(cfg.vocabExtra || [])]
+    .map((v) => v.name + '：' + v.cue).join('\n');
   const cur = moodLine(st, cfg);
   const clues = memoryClues(p?.name || '');
+  const inAngry = st.transition?.name === '生气';
   const system =
     '你在帮一个角色评估她此刻的内在情绪，以及她对聊天对象的画像。只输出 JSON，不要解释。\n'
     + '角色性格：' + (cfg.personality?.desc || '') + '\n'
@@ -508,6 +622,11 @@ async function llmScore(cfg, st, chat) {
     + '同样一句话，对不同画像的人触发的情绪不一样：'
     + '画像显示对方心思细、容易被戳到 → 多触发体恤、安心、触动、放软，别冒戏谑调侃；'
     + '对方大大咧咧 → 可以多触发戏谑、好奇、八卦。\n'
+    + (inAngry
+      ? '她正处于生气状态（拒绝交流/极简回应/冷淡）：情绪保持在生气/委屈/寒心这一类，不要突然开心；'
+        + '请评估对方最新消息的「哄」：none=没哄 / shallow=敷衍式（别生气了、好了好了、你怎么又生气了这类）'
+        + ' / genuine=认真哄（提到具体的事、道歉、表达理解和关心）。\n'
+      : '')
     + '她当前状态（延续性参考，别照抄）：' + cur;
   const user =
     '对方：' + chat.name + '，画像：' + (p?.summary || '（新认识，还不熟）')
@@ -515,10 +634,11 @@ async function llmScore(cfg, st, chat) {
     + (p?.emotionBias?.length ? '；面对 TA 更容易触发：' + p.emotionBias.join('、') : '')
     + (clues.length ? '\n记忆线索：' + clues.join('；') : '')
     + '\n最近对话：\n' + chat.lines.slice(-12).join('\n')
-    + '\n\n请输出 JSON：{"emotions":[{"name":"","level":0}],"switches":0,"load":0.0,"note":"",'
+    + '\n\n请输出 JSON：{"emotions":[{"name":"","level":0}],"switches":0,"load":0.0,"note":"","coax":"none",'
     + '"portrait":{"summary":"","familiarityDelta":0.0,"bondDelta":0.0,"addLikes":[],"addSensitivities":[],"addTriggers":[],"addTopics":[],"emotionBias":[]}}\n'
     + '约束：emotions 只从词库选，level 1~' + cap + '；switches 是这段对话里她的情绪切换次数 0~10；'
     + 'load 是认知负荷 0~1（深度思考、长时间斟酌、大量回忆、高强度共情都算）；note 是一句话情绪记忆 ≤40 字；'
+    + 'coax 只在生气状态时才有意义，取值 none/shallow/genuine；'
     + 'portrait 增量小步走：familiarityDelta/bondDelta 各 ≤0.03，add 数组每项 ≤12 字且最多 2 条，summary ≤30 字，没有就空。';
   const r = await fetch(cfg.llm.api + '/chat/completions', {
     method: 'POST',
@@ -618,6 +738,7 @@ export async function runUpdateOnce({ dry = false } = {}) {
   }
 
   const tick = { switches: 0, load: 0, recovered: false, chat: '', cost: 0, maxNewLevel: 0, note: '' };
+  let score = null; // 本轮主导对话的 LLM 打分（跃迁/生气哄判定用）
 
   // 心情只由主人/当前活跃聊天驱动；好友轮转（sweep）只补画像，不带偏心情
   const ownerChat = perChat.find((c) => c.qq === String(cfg.owner?.qq));
@@ -626,14 +747,16 @@ export async function runUpdateOnce({ dry = false } = {}) {
 
   if (!primary) {
     decayMood(st, cfg);
-    st.spirit = clamp(st.spirit + cfg.personality.recovery, 0, 100);
-    tick.recovered = true;
+    // 生气状态下安静也不会回精神（情绪没过去，谈不上午休）
+    const rec = st.transition?.name === '生气' ? 0 : cfg.personality.recovery;
+    st.spirit = clamp(st.spirit + rec, 0, spiritCap(st));
+    tick.recovered = rec > 0;
     tick.chat = (st.lastTick || {}).chat || ''; // 空窗期保留最后聊的人，注入行不断档
-    log('… 主人和当前聊天没有新对话（好友画像照常补），心情回落中，精神恢复 +' + cfg.personality.recovery + '（' + Math.round(st.spirit) + '）');
+    log('… 主人和当前聊天没有新对话（好友画像照常补），心情回落中，精神恢复 +' + rec + '（' + Math.round(st.spirit) + '）');
   } else {
     try {
-      const sc = await llmScore(cfg, st, primary);
-      applyScore(st, cfg, primary, sc, tick);
+      score = await llmScore(cfg, st, primary);
+      applyScore(st, cfg, primary, score, tick);
       log('💭 ' + primary.name + ' ' + primary.lines.length + ' 条对话 → '
         + moodLine(st, cfg).split('；')[0] + '  精神 ' + Math.round(st.spirit)
         + (tick.cost ? '（- ' + tick.cost + '）' : '')
@@ -665,6 +788,8 @@ export async function runUpdateOnce({ dry = false } = {}) {
   }
 
   st.lastTick = tick;
+  // 状态跃迁：连击累计 → 进入/消退；生气哄判定；负面优先
+  applyTransition(st, cfg, score, tick);
   st.status = statusWordFor(cfg, st, tick);
   pushHistory(st, tick);
   st.updatedAt = Date.now();
@@ -734,8 +859,12 @@ if (isMain) {
   if (cmd === 'status' || cmd === 'show') {
     const st = loadState();
     const aff = cfg.personality?.emotionAffinity || {};
-    console.log('  精神: ' + Math.round(st.spirit) + '/100  状态: ' + (st.status?.word || '?'));
+    console.log('  精神: ' + Math.round(st.spirit) + '/' + spiritCap(st) + '  状态: ' + (st.status?.word || '?'));
     console.log('  心情: ' + (st.mood.length ? st.mood.map((m) => m.name + 'Lv' + Math.round(m.level)).join(' · ') : '平静'));
+    if (st.transition) {
+      console.log('  跃迁: ' + st.transition.name + '（剩余约 ' + Math.max(1, Math.round((st.transition.until - Date.now()) / 60000)) + ' 分钟）');
+    }
+    console.log('  连击: 正向' + (st.streak?.pos || 0) + ' 负面' + (st.streak?.neg || 0) + ' 生气' + (st.streak?.angry || 0));
     console.log('  性格: ' + (cfg.personality?.name || '?') + '  易触发[' + (aff.boost || []).join('/') + ']  少触发[' + (aff.damp || []).join('/') + ']');
     console.log('  注入行: ' + moodLine(st, cfg));
     console.log('  画像: ' + Object.values(st.portraits).map((p) => p.name + '（熟度' + Math.round(p.familiarity) + '·羁绊' + Math.round(p.bond) + '）').join('，'));

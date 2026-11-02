@@ -57,9 +57,14 @@
       "cue": "思绪有点迟钝，停顿变多，语气慵懒"
     },
     {
-      "min": 0,
+      "min": 10,
       "word": "恍惚出神",
       "cue": "注意力容易飘，思考断断续续"
+    },
+    {
+      "min": 0,
+      "word": "极简回应",
+      "cue": "回复短到不能再短，一两字都行，但不会完全不说话——别让对方以为你卡死了"
     }
   ],
   "specialStatus": {
@@ -1637,5 +1642,33 @@
       "kind": "extra",
       "cue": "配套提示词+触发思路"
     }
-  ]
+  ],
+  "transition": {
+    "streakRounds": 2,
+    "angrySet": [
+      "生气",
+      "愤怒",
+      "恼火",
+      "被冒犯",
+      "厌恶",
+      "烦躁",
+      "寒心",
+      "又委屈又生气"
+    ],
+    "excited": {
+      "durationMs": 2700000,
+      "overflow": 20,
+      "exitSpirit": 60
+    },
+    "suppress": {
+      "durationMs": 1800000,
+      "drop": 20,
+      "exitRecover": 30
+    },
+    "angry": {
+      "durationMs": 5400000,
+      "coaxRecover": 15,
+      "idleNoRecover": true
+    }
+  }
 }
