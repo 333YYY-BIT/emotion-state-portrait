@@ -480,6 +480,10 @@ function applyPortrait(st, cfg, qq, d) {
 
 export function applyScore(st, cfg, chat, sc, tick) {
   decayMood(st, cfg);
+  // 缓冲区也随时间淡去（没被「升级」确认的新情绪会自己消失）
+  st.moodBuffer = (st.moodBuffer || [])
+    .map((e) => ({ ...e, level: +(e.level - (cfg.mood?.decayPerTick ?? 0.4)).toFixed(1) }))
+    .filter((e) => e.level >= 0.5);
   const fam = Number((st.portraits[chat.qq] || {}).familiarity) || 5;
   const cap = levelCap(cfg, fam);
   // 两级情绪映射（可叠加）：性格亲和/克制 + 画像情绪倾向
@@ -488,6 +492,18 @@ export function applyScore(st, cfg, chat, sc, tick) {
   const damp = aff.damp || [];
   const bias = (st.portraits[chat.qq] || {}).emotionBias || [];
   const maps = [];
+  const maxActive = cfg.mood?.maxActive ?? 3;
+  const nowAt = Date.now();
+  // 找「等级最低」的那个（并列时取更早出现的）——换它，而不是无脑换最早的
+  const lowestOf = () => {
+    let low = st.mood[0];
+    for (const m of st.mood) {
+      const ml = m.level ?? 0;
+      const ll = low.level ?? 0;
+      if (ml < ll || (ml === ll && (m.at ?? 0) < (low.at ?? 0))) low = m;
+    }
+    return low;
+  };
   for (const e of sc.emotions || []) {
     const name = String(e.name || '').trim();
     if (!name) continue;
@@ -501,30 +517,48 @@ export function applyScore(st, cfg, chat, sc, tick) {
     const ex = st.mood.find((m) => m.name === name);
     if (ex) {
       ex.level = Math.max(ex.level, lv);
-    } else {
-      // 新情绪：先看有没有「相近」的同类（vocab.kind 相同）已生效 → 取代它，等级降一级
-      const vm = vocabMap(cfg);
-      const kind = (vm[name] && vm[name].kind) || '';
-      const near = kind ? st.mood.find((m) => m.name !== name && ((vm[m.name] && vm[m.name].kind) || '') === kind) : null;
-      const nowAt = Date.now();
-      if (near) {
-        near.name = name;
-        near.level = clamp(near.level - 1, 1, cap); // 继承相近情绪等级并减一
-        near.at = nowAt;
-      } else if (st.mood.length >= (cfg.mood?.maxActive ?? 3)) {
-        // 没有相近的：顶掉最早出现的那个，从 1 级开始
-        let oldest = st.mood[0];
-        for (const m of st.mood) if ((m.at ?? 0) < (oldest.at ?? 0)) oldest = m;
-        oldest.name = name;
-        oldest.level = 1;
-        oldest.at = nowAt;
-      } else {
-        st.mood.push({ name, level: lv, at: nowAt });
-      }
+      continue;
+    }
+    // 新情绪：先看有没有「相近」的同类（vocab.kind 相同）已生效 → 取代它，等级降一级（情绪演化的自然读法）
+    const vm = vocabMap(cfg);
+    const kind = (vm[name] && vm[name].kind) || '';
+    const near = kind ? st.mood.find((m) => m.name !== name && ((vm[m.name] && vm[m.name].kind) || '') === kind) : null;
+    if (near) {
+      near.name = name;
+      near.level = clamp(near.level - 1, 1, cap); // 继承相近情绪等级并减一
+      near.at = nowAt;
+      continue;
+    }
+    if (st.mood.length < maxActive) {
+      st.mood.push({ name, level: lv, at: nowAt });
+      continue;
+    }
+    const low = lowestOf();
+    // 直接替换的两种情况：①最低的那个只剩 Lv1（不心疼）；②新情绪不比它弱（强情绪不该排队等）
+    if ((low.level ?? 0) <= 1 || lv >= (low.level ?? 0)) {
+      low.name = name;
+      low.level = lv;
+      low.at = nowAt;
+      continue;
+    }
+    // 其余情况进缓冲区：攒等级，够得着「最低那个降一级」才替换，替换时保留缓冲等级
+    const buf = st.moodBuffer || (st.moodBuffer = []);
+    const b = buf.find((m) => m.name === name);
+    if (b) b.level = clamp(Math.max(b.level, lv) + 1, 1, cap); // 再次出现 → 升级
+    else buf.push({ name, level: lv, at: nowAt });
+    buf.sort((a, b2) => b2.level - a.level);
+    st.moodBuffer = buf.slice(0, 2);
+    const top = st.moodBuffer[0];
+    if (top && top.level >= (low.level ?? 0) - 1) {
+      low.name = top.name;
+      low.level = top.level;
+      low.at = nowAt;
+      st.moodBuffer = st.moodBuffer.filter((m) => m !== top);
+      tick.bufferSwap = top.name;
     }
   }
   st.mood.sort((a, b) => b.level - a.level);
-  st.mood = st.mood.slice(0, cfg.mood?.maxActive ?? 3);
+  st.mood = st.mood.slice(0, maxActive);
 
   const switches = clamp(Number(sc.switches) || 0, 0, 10);
   const load = clamp(Number(sc.load) || 0, 0, 1);
