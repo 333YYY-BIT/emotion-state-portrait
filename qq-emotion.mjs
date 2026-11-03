@@ -35,11 +35,8 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
-// 解析 ws：优先从环境变量指定的宿主目录找（EMOTION_WS_FROM），否则直接从本包解析
 const require = createRequire(
-  process.env.EMOTION_WS_FROM
-    ? 'file:///' + process.env.EMOTION_WS_FROM.replace(/\\/g, '/').replace(/\/$/, '') + '/index.js'
-    : import.meta.url,
+  'file:///C:/Users/YangXinYuan/.dsh/profiles/desktop/node_modules/dsh-onebot-qq/lib/index.js',
 );
 // OneBot 模式才需要 ws；file 模式/插件环境可能没有它，别让它炸掉整个引擎
 let WebSocket = null;
@@ -248,6 +245,50 @@ function shortCue(cue) {
   return clause.trim().slice(0, 16);
 }
 
+/** 情绪正负极性：pos=+1 / neg=-1 / extra=0（中性词） */
+function moodPolarity(v) {
+  const k = String(v?.kind || '');
+  if (k === 'pos') return 1;
+  if (k === 'neg') return -1;
+  return 0;
+}
+
+/**
+ * 混合态表达（2026-11-03，学 dsh-mood）：不写成"喜悦Lv2·好奇Lv1"，
+ * 而是"喜悦里掺着好奇""开心，但也有些累"这种像人话的读法。
+ * 主导项仍带一句行为提示（cue），其余只给词，避免注入行太长。
+ */
+export function mixMoodPhrase(mood, vm) {
+  const list = [...(mood || [])].sort((a, b) => (b.level || 0) - (a.level || 0));
+  if (!list.length) return '平静';
+  const desc = (e) => e.name + 'Lv' + Math.round(e.level || 1);
+  const a = list[0];
+  const b = list[1];
+  const c = list[2];
+  const cue = (e) => {
+    const v = vm?.[e.name];
+    const sc = v ? shortCue(v.cue) : '';
+    return sc ? '：' + sc : '';
+  };
+  if (!b) return desc(a) + '（' + (cue(a).replace(/^：/, '') || a.name) + '）';
+  const pa = moodPolarity(vm?.[a.name]);
+  const pb = moodPolarity(vm?.[b.name]);
+  let s;
+  if (pa !== 0 && pa === pb) {
+    if ((a.level || 0) < 3 && (b.level || 0) < 3) s = a.name + '里掺着' + b.name;
+    else if ((a.level || 0) - (b.level || 0) >= 2) s = a.name + '，底下还压着点' + b.name;
+    else s = a.name + '混着' + b.name;
+  } else if (pa !== 0 && pb !== 0 && pa !== pb) {
+    const pos = pa > 0 ? a : b;
+    const neg = pa > 0 ? b : a;
+    s = pos.name + '，但也有些' + neg.name;
+  } else {
+    s = a.name + '混着' + b.name;
+  }
+  if (c) s += '，还带点' + c.name;
+  return s + '（主导' + desc(a) + cue(a) + '）';
+}
+
 export function levelCap(cfg, familiarity) {
   const fam = Number(familiarity) || 0;
   let cap = 2;
@@ -300,11 +341,7 @@ export function moodLine(st, cfg, chatQq) {
   const vm = vocabMap(cfg);
   const parts = [];
   if ((st.mood || []).length) {
-    parts.push('心情：' + st.mood.map((e) => {
-      const v = vm[e.name];
-      const sc = v ? shortCue(v.cue) : '';
-      return e.name + 'Lv' + Math.round(e.level) + (sc ? '（' + sc + '）' : '');
-    }).join('·'));
+    parts.push('心情：' + mixMoodPhrase(st.mood, vm));
   } else {
     parts.push('心情：平静');
   }
@@ -392,6 +429,19 @@ export function writeOutputs(st, cfg) {
 }
 
 // ── 情绪物理 ───────────────────────────────────────────────────────
+/** 衰减周期：2~3 小时随机（2026-11-03，学 dsh-mood 的"周期判定"） */
+export function decayIntervalMs(cfg) {
+  const h = cfg.integration?.decayHours || [2, 3];
+  const mid = (Number(h[0]) + Number(h[1])) / 2;
+  return Math.max(30 * 60000, mid * 3600000);
+}
+function randomizedDecayDelay(cfg) {
+  const h = cfg.integration?.decayHours || [2, 3];
+  const lo = Number(h[0]) || 2;
+  const hi = Math.max(lo, Number(h[1]) || 3);
+  return Math.round((lo + Math.random() * (hi - lo)) * 3600000);
+}
+
 function decayMood(st, cfg, times = 1) {
   const d = (cfg.mood?.decayPerTick ?? 0.4) * (Number(times) || 1);
   st.mood = (st.mood || [])
@@ -754,13 +804,17 @@ export async function runUpdateOnce({ dry = false } = {}) {
   const tick = { switches: 0, load: 0, recovered: false, chat: '', cost: 0, maxNewLevel: 0, note: '' };
   let score = null; // 本轮主导对话的 LLM 打分（跃迁/生气哄判定用）
 
-  // 离线补偿：关机/断网期间也按时间折算恢复与情绪衰减（免得一觉醒来精神还冻着）
+  // 离线补偿：关机/断网期间只按「衰减周期」折算（2026-11-03：衰减从每 10 分钟改成 2~3 小时随机一次）
   const tickMin = Number(cfg.integration?.tickMinutes) || 10;
-  const missed = Math.max(0, Math.min(288, Math.floor((Date.now() - (st.updatedAt || Date.now())) / (tickMin * 60000)) - 1));
+  const decaySpan = decayIntervalMs(cfg);
+  const offlineMs = Date.now() - (st.updatedAt || Date.now());
+  const missed = Math.max(0, Math.min(24, Math.floor(offlineMs / decaySpan) - 1));
   if (missed > 0) {
     decayMood(st, cfg, missed);
     tick.missed = missed;
-    log('🕰 离线 ' + missed + ' 轮，补情绪衰减 ' + (missed * (cfg.mood?.decayPerTick ?? 0.4)).toFixed(1) + ' 级');
+    st.nextDecayAt = Date.now() + randomizedDecayDelay(cfg);
+    log('🕰 离线 ' + missed + ' 个衰减周期（每 ' + Math.round(decaySpan / 3600000 * 10) / 10 + 'h），补情绪衰减 '
+      + (missed * (cfg.mood?.decayPerTick ?? 0.4)).toFixed(1) + ' 级');
   }
 
   // 心情只由主人/当前活跃聊天驱动；好友轮转（sweep）只补画像，不带偏心情
@@ -769,15 +823,28 @@ export async function runUpdateOnce({ dry = false } = {}) {
   const primary = ownerChat || (actives.length ? [...actives].sort((a, b) => b.newest - a.newest)[0] : null);
 
   if (!primary) {
-    decayMood(st, cfg);
+    // 空窗期：只有到了「衰减周期」才真正回落（2~3 小时随机一次，见 decayIntervalMs）
+    const now = Date.now();
+    const due = !st.nextDecayAt || now >= st.nextDecayAt;
+    if (due) {
+      const spans = st.lastDecayAt ? Math.max(1, Math.round((now - st.lastDecayAt) / decaySpan)) : 1;
+      decayMood(st, cfg, Math.min(6, spans));
+      st.lastDecayAt = now;
+      st.nextDecayAt = now + randomizedDecayDelay(cfg);
+      tick.decayed = true;
+    }
     // 生气状态下安静也不会回精神（情绪没过去，谈不上午休）
     const perTick = st.transition?.name === '生气' ? 0 : cfg.personality.recovery;
-    const rec = perTick * (1 + missed); // 补上离线期间的回合
+    // 恢复按 10 分钟一轮折算（decaySpan 是情绪衰减周期，跟恢复无关）
+    const recTicks = Math.max(0, Math.min(288, Math.floor(offlineMs / (tickMin * 60000))));
+    const rec = perTick * (1 + Math.max(0, recTicks - 1));
     st.spirit = clamp(st.spirit + rec, 0, spiritCap(st));
     tick.recovered = rec > 0;
     tick.chat = (st.lastTick || {}).chat || ''; // 空窗期保留最后聊的人，注入行不断档
-    log('… 主人和当前聊天没有新对话（好友画像照常补），心情回落中，精神恢复 +' + rec
-      + (missed > 0 ? '（含离线 ' + missed + ' 轮）' : '') + '（' + Math.round(st.spirit) + '）');
+    log('… 主人和当前聊天没有新对话（好友画像照常补），'
+      + (due ? '心情回落一次' : '心情保持（下次回落约 ' + Math.max(1, Math.round((st.nextDecayAt - now) / 60000)) + ' 分钟后）')
+      + '，精神恢复 +' + rec
+      + (recTicks > 1 ? '（含离线 ' + (recTicks - 1) + ' 轮）' : '') + '（' + Math.round(st.spirit) + '）');
   } else {
     try {
       score = await llmScore(cfg, st, primary);
