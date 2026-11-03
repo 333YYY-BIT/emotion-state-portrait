@@ -121,7 +121,8 @@
       "file": "C:/Users/YangXinYuan/.dsh/profiles/desktop/cordis.patch.yml",
       "begin": "=== 你现在的心情（自动更新·别念出来·只当底色）===",
       "end": "=== 心情结束 ==="
-    }
+    },
+    "tickMinutes": 10
   },
   "chatterLimit": 3,
   "vocab": [
