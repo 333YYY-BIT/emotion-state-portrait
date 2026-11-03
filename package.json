@@ -1,6 +1,6 @@
 {
   "name": "emotion-state-portrait",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "鎯呯华 路 鐘舵€?路 浜虹墿鐢诲儚寮曟搸锛氱粰 LLM 瑙掕壊鎯呯华杩炵画鎬с€佺簿绁炲€肩姸鎬佷笌鎸変汉鐢诲儚锛宖ile 妯″紡鍙帴浠讳綍 AI",
   "type": "module",
   "exports": {
@@ -50,5 +50,9 @@
     "type": "git",
     "url": "git+https://github.com/333YYY-BIT/emotion-state-portrait.git"
   },
-  "homepage": "https://github.com/333YYY-BIT/emotion-state-portrait"
+  "homepage": "https://github.com/333YYY-BIT/emotion-state-portrait",
+  "bin": {
+    "emotion-state-portrait": "qq-emotion.mjs",
+    "emotion-portrait": "qq-emotion.mjs"
+  }
 }

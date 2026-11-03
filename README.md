@@ -43,24 +43,53 @@
 - 每轮注入：写 `mood.txt`，宿主每轮读出来拼进 prompt，改完立刻生效，不用重启
 - 协议：MIT
 
-## 作为 DSH 插件安装
+## 安装
+
+### npm（推荐，任何项目里都能用）
 
 ```bash
+npm i emotion-state-portrait
+# 或 pnpm add emotion-state-portrait / yarn add emotion-state-portrait
+```
+
+装完直接：
+
+```bash
+npx emotion-state-portrait update     # 跑一轮情绪更新
+npx emotion-state-portrait status     # 看当前状态
+```
+
+包地址：https://www.npmjs.com/package/emotion-state-portrait
+
+### 作为 DSH 插件安装
+
+```bash
+# 方式一：从仓库装
 dsh plugin --profile <你的profile> add github:333YYY-BIT/emotion-state-portrait
+
+# 方式二：从 npm 装
+dsh plugin --profile <你的profile> add emotion-state-portrait
 ```
 
 装完自动获得：每 5 分钟一轮的自动情绪更新 + 三个工具（`emotion_status` / `emotion_tweak` / `emotion_update`）。
 LLM 配置：设环境变量 `EMOTION_LLM_KEY`，或改插件目录 `emotion/config.json` 里的 `llm.keyFile/keyPattern`。
 网页面板：`node <插件目录>/qq-emotion-ui.mjs` → http://127.0.0.1:5191
 
+### 手动用源码
+
+```bash
+git clone https://github.com/333YYY-BIT/emotion-state-portrait
+cd emotion-state-portrait
+npm i ws          # 可选：只有 onebot 模式需要
+```
+
 ## 快速开始（给任何 AI 用：file 模式）
 
 ### 1. 准备
 
 ```bash
-cd emotion-state-portrait
-# 可选：onebot 模式才需要 ws
-npm i ws
+# 从 npm 装的话，配置模板在 node_modules/emotion-state-portrait/emotion/config.example.json
+cp emotion/config.example.json emotion/config.json
 ```
 
 修改 `emotion/config.json`：
