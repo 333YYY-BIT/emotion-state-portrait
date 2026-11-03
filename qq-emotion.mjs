@@ -35,8 +35,11 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
+// 解析 ws：优先从环境变量指定的宿主目录找（EMOTION_WS_FROM），否则直接从本包解析
 const require = createRequire(
-  'file:///C:/Users/YangXinYuan/.dsh/profiles/desktop/node_modules/dsh-onebot-qq/lib/index.js',
+  process.env.EMOTION_WS_FROM
+    ? 'file:///' + process.env.EMOTION_WS_FROM.replace(/\\/g, '/').replace(/\/$/, '') + '/index.js'
+    : import.meta.url,
 );
 // OneBot 模式才需要 ws；file 模式/插件环境可能没有它，别让它炸掉整个引擎
 let WebSocket = null;

@@ -8,3 +8,7 @@ mood.txt
 mood-map.json
 emotion.log
 emotion/state.json
+
+*.tgz
+
+emotion/config.json
