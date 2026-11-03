@@ -389,9 +389,10 @@ export function writeOutputs(st, cfg) {
 }
 
 // ── 情绪物理 ───────────────────────────────────────────────────────
-function decayMood(st, cfg) {
+function decayMood(st, cfg, times = 1) {
+  const d = (cfg.mood?.decayPerTick ?? 0.4) * (Number(times) || 1);
   st.mood = (st.mood || [])
-    .map((e) => ({ ...e, level: +(e.level - (cfg.mood?.decayPerTick ?? 0.4)).toFixed(1) }))
+    .map((e) => ({ ...e, level: +(e.level - d).toFixed(1) }))
     .filter((e) => e.level >= 0.5); // Lv1 是最低有效档，掉穿 0.5 就清掉，别留「Lv0」
 }
 
@@ -750,6 +751,15 @@ export async function runUpdateOnce({ dry = false } = {}) {
   const tick = { switches: 0, load: 0, recovered: false, chat: '', cost: 0, maxNewLevel: 0, note: '' };
   let score = null; // 本轮主导对话的 LLM 打分（跃迁/生气哄判定用）
 
+  // 离线补偿：关机/断网期间也按时间折算恢复与情绪衰减（免得一觉醒来精神还冻着）
+  const tickMin = Number(cfg.integration?.tickMinutes) || 10;
+  const missed = Math.max(0, Math.min(288, Math.floor((Date.now() - (st.updatedAt || Date.now())) / (tickMin * 60000)) - 1));
+  if (missed > 0) {
+    decayMood(st, cfg, missed);
+    tick.missed = missed;
+    log('🕰 离线 ' + missed + ' 轮，补情绪衰减 ' + (missed * (cfg.mood?.decayPerTick ?? 0.4)).toFixed(1) + ' 级');
+  }
+
   // 心情只由主人/当前活跃聊天驱动；好友轮转（sweep）只补画像，不带偏心情
   const ownerChat = perChat.find((c) => c.qq === String(cfg.owner?.qq));
   const actives = perChat.filter((c) => !c.sweep && c !== ownerChat);
@@ -758,11 +768,13 @@ export async function runUpdateOnce({ dry = false } = {}) {
   if (!primary) {
     decayMood(st, cfg);
     // 生气状态下安静也不会回精神（情绪没过去，谈不上午休）
-    const rec = st.transition?.name === '生气' ? 0 : cfg.personality.recovery;
+    const perTick = st.transition?.name === '生气' ? 0 : cfg.personality.recovery;
+    const rec = perTick * (1 + missed); // 补上离线期间的回合
     st.spirit = clamp(st.spirit + rec, 0, spiritCap(st));
     tick.recovered = rec > 0;
     tick.chat = (st.lastTick || {}).chat || ''; // 空窗期保留最后聊的人，注入行不断档
-    log('… 主人和当前聊天没有新对话（好友画像照常补），心情回落中，精神恢复 +' + rec + '（' + Math.round(st.spirit) + '）');
+    log('… 主人和当前聊天没有新对话（好友画像照常补），心情回落中，精神恢复 +' + rec
+      + (missed > 0 ? '（含离线 ' + missed + ' 轮）' : '') + '（' + Math.round(st.spirit) + '）');
   } else {
     try {
       score = await llmScore(cfg, st, primary);
