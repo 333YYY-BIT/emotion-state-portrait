@@ -9,7 +9,7 @@
     "churnCost": 2,
     "loadCost": 6,
     "intenseCost": 1,
-    "recovery": 5,
+    "recovery": 13,
     "baselineSpirit": 78,
     "empathyBonus": true,
     "emotionAffinity": {
