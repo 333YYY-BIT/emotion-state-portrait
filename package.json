@@ -1,7 +1,7 @@
 {
   "name": "emotion-state-portrait",
-  "version": "1.0.4",
-  "description": "鎯呯华 路 鐘舵€?路 浜虹墿鐢诲儚寮曟搸锛氱粰 LLM 瑙掕壊鎯呯华杩炵画鎬с€佺簿绁炲€肩姸鎬佷笌鎸変汉鐢诲儚锛宖ile 妯″紡鍙帴浠讳綍 AI",
+  "version": "1.0.5",
+  "description": "情绪·状态·人物画像引擎：303 情绪词分层打分、冷门探索奖励、同类冷却，精神值阶梯与彩蛋式状态跃迁，file/onebot 双模式",
   "type": "module",
   "exports": {
     ".": "./index.js",
