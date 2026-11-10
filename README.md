@@ -54,7 +54,7 @@
 ```bash
 # 从 GitHub 装（最新代码）
 dsh plugin --profile <你的profile> add github:333YYY-BIT/emotion-state-portrait
-# 或从 npm 装（emotion-state-portrait@1.0.4+；1.0.5 的最新代码在 GitHub）
+# 或从 npm 装（emotion-state-portrait@1.0.5+）
 dsh plugin --profile <你的profile> add emotion-state-portrait
 ```
 
