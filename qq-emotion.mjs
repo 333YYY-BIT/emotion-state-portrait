@@ -677,7 +677,7 @@ export function applyTransition(st, cfg, sc, tick) {
   if (cur) tick.transition = cur.name;
 }
 
-// ── LLM 打分 ───────────────────────────────────────────────────────
+// ── LLM 打分（分层：先选大类，再在类内选词） ──────────────────────
 function memoryClues(name) {
   const out = [];
   try {
@@ -694,8 +694,97 @@ function memoryClues(name) {
   return out;
 }
 
-async function llmScore(cfg, st, chat) {
-  const vm = vocabMap(cfg);
+const CATEGORY_LABELS = { pos: '正向', neg: '负面', think: '思考', social: '社交', subtle: '细微', combo: '复合' };
+const CATEGORY_KEYS = Object.keys(CATEGORY_LABELS);
+
+/** 类内词池：curated 按 kind，vocabExtra 按 config.extraKind（一次性分类结果）归入各大类 */
+export function wordPool(cfg, category) {
+  const out = [];
+  for (const v of cfg.vocab || []) if (!category || v.kind === category) out.push(v);
+  const ek = cfg.extraKind || {};
+  for (const v of cfg.vocabExtra || []) if (!category || ek[v.name] === category) out.push(v);
+  return out;
+}
+
+/** 最近 N 轮出现过的情绪名（新→旧，去重），给「冷门探索奖励」当反面清单 */
+export function recentTopNames(st, n = 10) {
+  const names = [];
+  for (const h of [...(st.history || [])].reverse().slice(0, n)) {
+    const moodStr = String(h.mood || '');
+    if (!moodStr || moodStr === '平静') continue;
+    for (const part of moodStr.split('·')) {
+      const name = part.replace(/Lv\d+(\.\d+)?$/, '').trim();
+      if (name && !names.includes(name)) names.push(name);
+    }
+  }
+  return names.slice(0, 12);
+}
+
+/** 当前主导情绪名（等级最高的那个） */
+export function topMoodName(st) {
+  const list = [...(st.mood || [])].sort((a, b) => (b.level || 0) - (a.level || 0));
+  return list[0]?.name || '';
+}
+
+/**
+ * 同类冷却记账：主导情绪连续 3 轮是同一个词 → 下一轮把它列入禁用名单；
+ * 换掉就解除。挂在 st.explore 上持久化。
+ */
+export function updateExplore(st, topName) {
+  const ex = st.explore || (st.explore = { lastTop: '', sameStreak: 0, ban: '' });
+  if (!topName) return ex;
+  if (ex.ban && topName !== ex.ban) ex.ban = '';
+  if (topName === ex.lastTop) ex.sameStreak += 1;
+  else ex.sameStreak = 1;
+  ex.lastTop = topName;
+  if (ex.sameStreak >= 3) ex.ban = topName;
+  return ex;
+}
+
+async function chatJson(cfg, messages, maxTokens) {
+  const r = await fetch(cfg.llm.api + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + readKey(cfg) },
+    body: JSON.stringify({ model: cfg.llm.model, messages, max_tokens: maxTokens || 700, temperature: 0.7 }),
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!r.ok) throw new Error('LLM HTTP ' + r.status);
+  const j = await r.json();
+  const raw = String(j?.choices?.[0]?.message?.content ?? '').trim();
+  try {
+    const a = raw.indexOf('{');
+    const b = raw.lastIndexOf('}');
+    return JSON.parse(raw.slice(a, b + 1));
+  } catch {
+    throw new Error('打分没给出 JSON: ' + raw.slice(0, 80));
+  }
+}
+
+/** 第一步：只挑大类（6 选 1，小模型负担小得多）；生气状态直接锁 neg，省一次调用 */
+export async function pickCategory(cfg, st, chat) {
+  if (st.transition?.name === '生气') return 'neg';
+  const p = st.portraits[chat.qq] || null;
+  const cats = CATEGORY_KEYS.map((k) => k + ' ' + CATEGORY_LABELS[k]
+    + ({ pos: '（如 喜悦、安心、期待、触动、暖心）', neg: '（如 委屈、烦躁、忐忑、失落、孤单）',
+      think: '（如 好奇、疑惑、恍然、纠结、盘算）', social: '（如 熟稔、亲近、客套、戒备、捧场）',
+      subtle: '（如 戏谑、慵懒、出神、平静、敷衍）', combo: '（如 又委屈又生气、哭笑不得、酸甜交织）' }[k] || '')).join('\n');
+  const system =
+    '你只负责判断一段对话里角色最主要的情绪属于哪一大类。只输出 JSON {"category":"pos"}（取值 '
+    + CATEGORY_KEYS.join('/') + ' 之一），不要解释。\n'
+    + '角色性格：' + (cfg.personality?.desc || '') + '\n'
+    + '六大类：\n' + cats + '\n'
+    + '她当前状态（延续性参考，别照抄）：' + moodLine(st, cfg);
+  const user =
+    '对方：' + chat.name + '，画像：' + (p?.summary || '（新认识，还不熟）')
+    + '\n最近对话：\n' + chat.lines.slice(-12).join('\n')
+    + '\n请判断这段对话里她最主要的情绪属于哪一大类。只输出 JSON。';
+  const got = await chatJson(cfg, [{ role: 'system', content: system }, { role: 'user', content: user }], 200);
+  const c = String(got?.category || '').trim().toLowerCase();
+  return CATEGORY_KEYS.includes(c) ? c : null; // 大类不对就退回全词库打分，别让流程断掉
+}
+
+/** 第二步：只在大类词池里挑具体情绪（延续原 JSON 契约 + 探索奖励 + 冷却禁用） */
+export function buildScorePrompts(cfg, st, chat, category) {
   const p = st.portraits[chat.qq] || null;
   const fam = Number(p?.familiarity) || 5;
   const bond = Number(p?.bond) || 5;
@@ -703,23 +792,26 @@ async function llmScore(cfg, st, chat) {
   const aff = cfg.personality?.emotionAffinity || {};
   const boost = aff.boost || [];
   const damp = aff.damp || [];
-  // 完整词库全量进提示词：303 个情绪词都有机会被选中（用户要求所有情绪都生效）
-  const vocabLines = [...(cfg.vocab || []), ...(cfg.vocabExtra || [])]
-    .map((v) => v.name + '：' + v.cue).join('\n');
+  const pool = wordPool(cfg, category);
+  const poolLines = pool.map((v) => v.name + '：' + v.cue).join('\n');
   const cur = moodLine(st, cfg);
   const clues = memoryClues(p?.name || '');
   const inAngry = st.transition?.name === '生气';
+  const recent = recentTopNames(st);
+  const ex = st.explore || {};
   const system =
     '你在帮一个角色评估她此刻的内在情绪，以及她对聊天对象的画像。只输出 JSON，不要解释。\n'
     + '角色性格：' + (cfg.personality?.desc || '') + '\n'
-    + '情绪词库（只能从词库选，name：说话表现）：\n' + vocabLines + '\n'
+    + '情绪词库（只能从下面这批词里选，name：说话表现）：\n' + poolLines + '\n'
     + '等级含义：1=微弱（语气细微变化）2=明显 3=强烈（主导对话风格）4=极致（情绪压过理性）\n'
     + '性格情绪映射：这个角色更容易触发「' + (boost.join('、') || '无') + '」，很少触发「' + (damp.join('、') || '无') + '」'
-    + '——打分时优先考虑前者、避开后者，并把前者的等级给足。\n'
+    + '——前者只是轻微倾向：同样贴切时优先考虑前者、避开后者，但别每轮都选它们，也别自动给高等级（正常等级即可）。\n'
     + '规则：最多 3 个情绪可叠加；强烈情绪会随对话慢慢回落，不要永远停在最高级；'
     + '同样一句话，对不同画像的人触发的情绪不一样：'
     + '画像显示对方心思细、容易被戳到 → 多触发体恤、安心、触动、放软，别冒戏谑调侃；'
     + '对方大大咧咧 → 可以多触发戏谑、好奇、八卦。\n'
+    + (recent.length ? '最近几轮她的情绪是：' + recent.join('、') + '。同样贴切时优先挑这份名单之外的新鲜情绪，别连续几轮用同一批词。\n' : '')
+    + (ex.ban ? '本轮不要再用「' + ex.ban + '」：她连续好几轮都是它，需要换一换。\n' : '')
     + (inAngry
       ? '她正处于生气状态（拒绝交流/极简回应/冷淡）：情绪保持在生气/委屈/寒心这一类，不要突然开心；'
         + '请评估对方最新消息的「哄」：none=没哄 / shallow=敷衍式（别生气了、好了好了、你怎么又生气了这类）'
@@ -738,27 +830,17 @@ async function llmScore(cfg, st, chat) {
     + 'load 是认知负荷 0~1（深度思考、长时间斟酌、大量回忆、高强度共情都算）；note 是一句话情绪记忆 ≤40 字；'
     + 'coax 只在生气状态时才有意义，取值 none/shallow/genuine；'
     + 'portrait 增量小步走：familiarityDelta/bondDelta 各 ≤0.03，add 数组每项 ≤12 字且最多 2 条，summary ≤30 字，没有就空。';
-  const r = await fetch(cfg.llm.api + '/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + readKey(cfg) },
-    body: JSON.stringify({
-      model: cfg.llm.model,
-      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-      max_tokens: cfg.llm.maxTokens || 700,
-      temperature: 0.7,
-    }),
-    signal: AbortSignal.timeout(60000),
-  });
-  if (!r.ok) throw new Error('LLM HTTP ' + r.status);
-  const j = await r.json();
-  const raw = String(j?.choices?.[0]?.message?.content ?? '').trim();
-  try {
-    const a = raw.indexOf('{');
-    const b = raw.lastIndexOf('}');
-    return JSON.parse(raw.slice(a, b + 1));
-  } catch {
-    throw new Error('打分没给出 JSON: ' + raw.slice(0, 80));
-  }
+  return { system, user, pool };
+}
+
+export async function scoreInCategory(cfg, st, chat, category) {
+  const { system, user } = buildScorePrompts(cfg, st, chat, category);
+  return chatJson(cfg, [{ role: 'system', content: system }, { role: 'user', content: user }], cfg.llm.maxTokens || 700);
+}
+
+async function llmScore(cfg, st, chat) {
+  const category = await pickCategory(cfg, st, chat);
+  return scoreInCategory(cfg, st, chat, category);
 }
 
 // ── 一轮更新 ───────────────────────────────────────────────────────
@@ -883,6 +965,7 @@ export async function runUpdateOnce({ dry = false } = {}) {
     try {
       score = await llmScore(cfg, st, primary);
       applyScore(st, cfg, primary, score, tick);
+      updateExplore(st, topMoodName(st));
       log('💭 ' + primary.name + ' ' + primary.lines.length + ' 条对话 → '
         + moodLine(st, cfg).split('；')[0] + '  精神 ' + Math.round(st.spirit)
         + (tick.cost ? '（- ' + tick.cost + '）' : '')
